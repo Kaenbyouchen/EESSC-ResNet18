@@ -9,6 +9,8 @@ from torch.utils.data import Dataset, DataLoader
 import torch.nn.functional as F
 from torchvision import transforms
 from model import ResNet18  # 你的ResNet18(3通道)实现
+from copy import deepcopy
+
 
 # ========= 必改：你的数据路径 & 模态 =========
 # 目录结构示例：
@@ -30,28 +32,21 @@ from model import ResNet18  # 你的ResNet18(3通道)实现
 python -m visdom.server -port 8097
 
 """
-train_dir = r"D:\EESSC\ResNet18\subset\train_small"   # 或 /train/RGB /train/PACKED /train/RAW
-test_dir  = r"D:\EESSC\ResNet18\subset\test_small"    # 对应的 test 路径
+train_dir = r"D:\EESSC\archive\dataset_v5\train"   # 或 /train/RGB /train/PACKED /train/RAW
+val_dir   = r"D:\EESSC\archive\dataset_v5\val"   # 新增：验证集
+test_dir  = r"D:\EESSC\archive\dataset_v5\test"    # 对应的 test 路径
 MODALITY  = "RAW"  # 选：'RGB' / 'RGB_RESIZED' / 'PACKED' / 'RAW'
 
 
 
 def make_unique_path(base_name: str, acc: float, save_dir="./models") -> str:
+    import time
     os.makedirs(save_dir, exist_ok=True)
     base, ext = os.path.splitext(base_name)
-
-    # 找到已有的编号
-    existing = [f for f in os.listdir(save_dir) if f.startswith(base)]
-    max_idx = 0
-    for f in existing:
-        parts = f.split("_")
-        for p in parts:
-            if p.isdigit():
-                max_idx = max(max_idx, int(p))
-
-    new_idx = max_idx + 1
-    fname = f"{base}_{new_idx}_acc{acc:.4f}{ext}"
+    timestamp = time.strftime("%Y%m%d-%H%M%S")  # e.g. 20250909-234500
+    fname = f"{base}_acc{acc:.4f}_{timestamp}{ext}"
     return os.path.join(save_dir, fname)
+
 
 
 
@@ -61,10 +56,10 @@ def make_unique_path(base_name: str, acc: float, save_dir="./models") -> str:
 IN_CH = {"RGB": 3, "RGB_RESIZED": 3, "RAW": 1, "PACKED": 4}[MODALITY]
 
 BATCH_SIZE = 32                    # 512 太大容易炸显存，先用 128；不够再调
-EPOCH = 300
-LR = 1e-3
+EPOCH = 100
+LR = 1e-4
 WEIGHT_DECAY = 1e-4    #让参数往 0 方向“收缩”，避免权重无限增大
-SAVE_PATH = f"./models/ResNet18_{MODALITY}.pth"
+# SAVE_PATH = f"./models/ResNet18_{MODALITY}.pth"
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 print("device =", device, "| modality =", MODALITY, "| in_ch =", IN_CH)
 
@@ -179,8 +174,11 @@ class MixedFolder(Dataset):
 
 # ---------------- DataLoader ----------------
 train_set = MixedFolder(train_dir, is_train=True, modality=MODALITY)  #MixedFolder取单个样本，train_set[i] 返回 (x, y)，其中 x=[C,224,224] 的图像张量，y 是类别标签。
+val_set   = MixedFolder(val_dir,   is_train=False, modality=MODALITY)
 test_set  = MixedFolder(test_dir,  is_train=False, modality=MODALITY)
+
 train_loader = DataLoader(train_set, batch_size=BATCH_SIZE, shuffle=True,  num_workers=0) #取成批取样本
+val_loader   = DataLoader(val_set,   batch_size=BATCH_SIZE, shuffle=False, num_workers=0)
 test_loader  = DataLoader(test_set,  batch_size=BATCH_SIZE, shuffle=False, num_workers=0)
 
 # ---------------- 模型：适配器 + 你的ResNet18(4类) ----------------
@@ -210,6 +208,7 @@ def evalute(model, loader):
 
 # ---------------- 训练循环（保留你原逻辑风格） ----------------
 best_acc, best_epoch, global_step = 0.0, 0, 0
+best_state = None  # 缓存“最佳”权重，训练结束再落盘
 for epoch in range(EPOCH):
     running_loss = 0.0
     model.train()
@@ -232,7 +231,7 @@ for epoch in range(EPOCH):
         print("\repoch: {} train loss: {:^3.0f}%[{}->{}]{:.3f}".format(
             epoch+1, int(rate*100), a, b, loss), end="")
         #可视化训练 loss
-        epoch_loss = running_loss / len(train_loader)
+    epoch_loss = running_loss / len(train_loader)
     try:
         viz.line([epoch_loss], [epoch + 1], win='loss',
                      update='append', opts=dict(title='Training Loss (per epoch)',
@@ -240,32 +239,29 @@ for epoch in range(EPOCH):
     except Exception:
          pass
 
-    # 每个 epoch 结束在测试集评估
-    test_acc = evalute(model, test_loader)
-    print("  epoch{} test acc:{}".format(epoch+1, test_acc))
-    # 此处注释内容为仅保留accuracy上升的数据画折线图
-    # if test_acc > best_acc:
-    #     best_acc, best_epoch = test_acc, epoch + 1
-    #     torch.save(model.state_dict(), SAVE_PATH)
-    #     try:
-    #         viz.line([test_acc], [global_step], win='test_acc', update='append', opts=dict(title='Validation Accuracy'))
-    #     except Exception:
-    #         pass
+    # 每个 epoch 结束在验证集集评估
+    val_acc = evalute(model, val_loader)
+    print("  epoch{} val acc:{}".format(epoch + 1, val_acc))
 
-    # 可视化测试准确率：每个 epoch 都画
     try:
-        viz.line([test_acc], [epoch + 1], win='test_acc', update='append',
-                 opts=dict(title='Validation Accuracy',
-                           xlabel='Epoch', ylabel='Accuracy'))
+        viz.line([val_acc], [epoch + 1], win='val_acc', update='append',
+                 opts=dict(title='Validation Accuracy', xlabel='Epoch', ylabel='Accuracy'))
     except Exception:
         pass
 
-    # 再单独保存最好模型
-    if test_acc > best_acc:
-        best_acc, best_epoch = test_acc, epoch + 1
-        save_path = make_unique_path(f"ResNet18_{MODALITY}.pth", best_acc, "./models")
-        torch.save(model.state_dict(), save_path)
-        print(f"[INFO] 保存最优模型 -> {save_path}")
+    if val_acc > best_acc:
+        best_acc, best_epoch = val_acc, epoch + 1
+        best_state = deepcopy(model.state_dict())
 
-print("Finish ! 最优测试准确率：{:.4f} @ epoch {}".format(best_acc, best_epoch))
-print("模型已保存到：", SAVE_PATH)
+# === 训练结束：只保存一次“最佳模型” ===
+final_path = make_unique_path(f"ResNet18_{MODALITY}.pth", best_acc, "./models")
+torch.save(best_state if best_state is not None else model.state_dict(), final_path)
+print(f"[INFO] 保存最优模型 -> {final_path}")
+print("Finish ! 最优val准确率：{:.4f} @ epoch {}".format(best_acc, best_epoch))
+
+# 用最优权重在测试集上做一次最终评估
+if best_state is not None:
+    model.load_state_dict(best_state)
+test_acc_final = evalute(model, test_loader)
+print("Final TEST accuracy: {:.4f}".format(test_acc_final))
+
