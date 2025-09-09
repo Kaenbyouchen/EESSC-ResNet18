@@ -1,0 +1,9 @@
+{
+  "test_dir": "D:/EESSC/ResNet18/subset/test_small",
+  "modality": "RGB",
+  "weights": "./models/ResNet18_RGB.pth",
+  "batch_size": 32,
+  "num_workers": 0,
+  "device": "cuda:0",
+  "save_cm_csv": "./results/cm_rgb.csv"
+}
