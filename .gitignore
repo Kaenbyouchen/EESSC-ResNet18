@@ -1,21 +1,14 @@
-# 忽略 subset 目录（包括里面所有文件）
+# 忽略数据集
+CIFAR10/
 subset/
 
-# Python 缓存文件
-__pycache__/
-*.pyc
-
-# PyTorch 模型文件
+# 忽略模型文件
 *.pth
 *.pt
+*.tar.gz
 
-# 数据文件
-*.npy
-*.npz
-
-# PyCharm 配置
+# Python 缓存
+__pycache__/
+*.pyc
 .idea/
-
-# 系统垃圾文件
 .DS_Store
-Thumbs.db
