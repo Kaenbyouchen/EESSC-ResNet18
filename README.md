@@ -39,11 +39,8 @@ ResNet18/
 Run the training script depending on the modality:
 
 ```bash
-# Train on RGB images
+# Train on RGB/RAW/RGB_RESIZED/PACKED images
 python train4types(no valid).py
-
-# Train on RAW images with BW normalization
-python train4types(no valid)BW norm.py
 ```
 ### 3. Testing
 Run:
