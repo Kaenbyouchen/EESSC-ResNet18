@@ -1,6 +1,5 @@
 # ignore datasets
 CIFAR10/
-subset/
 
 # ignore models
 *.pth
