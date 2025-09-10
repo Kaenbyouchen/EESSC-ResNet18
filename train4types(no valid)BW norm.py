@@ -12,6 +12,10 @@ import torch.nn.functional as F
 from torchvision import transforms
 
 from model import ResNet18  # 你的 ResNet18 实现（支持 in_ch）
+# === RAW 归一化配置（固定黑白电平） ===
+RAW_BLACK_LEVEL = 64.0       # 相机黑电平，未知可先用 0 或 64
+RAW_WHITE_LEVEL = 4095.0     # 12-bit: 4095；14-bit: 16383；16-bit: 65535
+
 
 # ========= 必改：数据路径 & 模态 =========
 train_dir = r"D:\EESSC\archive\80train20test\train"
@@ -86,11 +90,10 @@ class MixedFolder(Dataset):
 
     def _load_npy(self, path: str) -> torch.Tensor:
         arr = np.load(path).astype(np.float32)
-        mn, mx = float(arr.min()), float(arr.max())
-        if mx > mn:
-            arr = (arr - mn) / (mx - mn)
-        else:
-            arr = np.zeros_like(arr, dtype=np.float32)
+        # improvement:固定电平：先按相机黑/白电平归一化到 [0,1]
+        den = max(RAW_WHITE_LEVEL - RAW_BLACK_LEVEL, 1e-6)
+        arr = (arr - RAW_BLACK_LEVEL) / den
+        arr = np.clip(arr, 0.0, 1.0)
 
         if arr.ndim == 2:            # (H,W) -> (1,H,W)
             arr = arr[None, ...]
@@ -102,8 +105,8 @@ class MixedFolder(Dataset):
         x = torch.from_numpy(arr)    # [C,H,W]
         x = F.interpolate(x.unsqueeze(0), size=(224, 224),
                           mode="bilinear", align_corners=False).squeeze(0)
-        if self.is_train and torch.rand(1).item() < 0.5:   #npy文件 improvement:在训练阶段，有 50% 概率把输入样本做一次水平翻转:长跑几十个 epoch 后，模型可能见过 500 次原图 + 500 次镜像图，相当于学习过 2000 个“视角”的样本。
-            x = torch.flip(x, dims=[2])
+        # if self.is_train and torch.rand(1).item() < 0.5:   #npy文件 improvement:在训练阶段，有 50% 概率把输入样本做一次水平翻转:长跑几十个 epoch 后，模型可能见过 500 次原图 + 500 次镜像图，相当于学习过 2000 个“视角”的样本。
+        #     x = torch.flip(x, dims=[2])
         x = (x - 0.5) / 0.5
         return x
 
