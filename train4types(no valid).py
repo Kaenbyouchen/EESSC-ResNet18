@@ -13,11 +13,19 @@ from torchvision import transforms
 
 from model import ResNet18  # 你的 ResNet18 实现（支持 in_ch）
 
-# ========= 必改：数据路径 & 模态 =========
+# ========= Data storage path & Modality=========
 train_dir = r"D:\EESSC\archive\80train20test\train"
 test_dir  = r"D:\EESSC\archive\80train20test\test"
-MODALITY  = "RAW"  # 选：'RGB' / 'RGB_RESIZED' / 'PACKED' / 'RAW'
+MODALITY  = "RAW"  # choose: 'RGB' / 'RGB_RESIZED' / 'PACKED' / 'RAW'
 # ======================================
+# mapping modality to channels
+IN_CH = {"RGB": 3, "RGB_RESIZED": 3, "RAW": 1, "PACKED": 4}[MODALITY]
+BATCH_SIZE = 64
+EPOCH = 100
+LR = 6e-4
+WEIGHT_DECAY = 0.05
+device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
+print("device =", device, "| modality =", MODALITY, "| in_ch =", IN_CH)
 
 def make_unique_path(base_name: str, acc: float, save_dir="./models") -> str:
     os.makedirs(save_dir, exist_ok=True)
@@ -26,17 +34,8 @@ def make_unique_path(base_name: str, acc: float, save_dir="./models") -> str:
     fname = f"{base}_acc{acc:.4f}_{ts}{ext}"
     return os.path.join(save_dir, fname)
 
-# 映射模态到输入通道数
-IN_CH = {"RGB": 3, "RGB_RESIZED": 3, "RAW": 1, "PACKED": 4}[MODALITY]
 
-BATCH_SIZE = 32
-EPOCH = 100
-LR = 3e-4
-WEIGHT_DECAY = 0.05
-device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-print("device =", device, "| modality =", MODALITY, "| in_ch =", IN_CH)
-
-# ---------------- 通用数据增强（对PNG有效；NPY走张量增强） ----------------
+# ---------------- General data augmentation (effective for PNG) ----------------
 pil_train_tf = transforms.Compose([
     transforms.Resize((224, 224)),
     # transforms.RandomHorizontalFlip(p=0.5),   #improvement
@@ -51,11 +50,11 @@ pil_test_tf = transforms.Compose([
                          (0.5, 0.5, 0.5)),
 ])
 
-# ---------------- 数据集 ----------------
+# ---------------- probably data types ----------------
 VALID_EXTS = {".png", ".jpg", ".jpeg", ".bmp", ".npy"}
 
 class MixedFolder(Dataset):
-    """ImageFolder 风格：支持 png/jpg 与 npy；支持 类别/模态/文件 结构"""
+    # Loading png/npy
     def __init__(self, root, is_train: bool, modality: str | None = None):
         self.root = root
         self.is_train = is_train
@@ -102,7 +101,7 @@ class MixedFolder(Dataset):
         x = torch.from_numpy(arr)    # [C,H,W]
         x = F.interpolate(x.unsqueeze(0), size=(224, 224),
                           mode="bilinear", align_corners=False).squeeze(0)
-        if self.is_train and torch.rand(1).item() < 0.5:   #npy文件 improvement:在训练阶段，有 50% 概率把输入样本做一次水平翻转:长跑几十个 epoch 后，模型可能见过 500 次原图 + 500 次镜像图，相当于学习过 2000 个“视角”的样本。
+        if self.is_train and torch.rand(1).item() < 0.5:   #npy improvement:horizontal flip: enlarge dataset
             x = torch.flip(x, dims=[2])
         x = (x - 0.5) / 0.5
         return x
@@ -128,13 +127,13 @@ num_classes = len(train_set.classes) if len(train_set.classes) > 0 else 4
 train_loader = DataLoader(train_set, batch_size=BATCH_SIZE, shuffle=True,  num_workers=0)
 test_loader  = DataLoader(test_set,  batch_size=BATCH_SIZE, shuffle=False, num_workers=0)
 
-# ---------------- 模型/优化器 ----------------
+# ---------------- Model and Optimizer ----------------
 model = ResNet18(classes_num=num_classes, in_ch=IN_CH).to(device)
 optimizer = optim.Adam(model.parameters(), lr=LR, weight_decay=WEIGHT_DECAY)
 criterion = nn.CrossEntropyLoss()
 viz = visdom.Visdom()
 
-# ---------------- 评估函数：给定 loader 计算准确率 ----------------
+# ---------------- Evaluation function: Calculate the accuracy rate given the loader ----------------
 @torch.no_grad()
 def evaluate_acc(model: nn.Module, loader: DataLoader) -> float:
     model.eval()
@@ -149,9 +148,9 @@ def evaluate_acc(model: nn.Module, loader: DataLoader) -> float:
         correct += (pred == y).float().sum().item()
     return correct / total
 
-# ---------------- 训练循环：每轮都在 test 上评估，并据此选最优 ----------------
-best_test_acc, best_epoch = 0.0, 0       # “最佳”按 test-accuracy 来选
-best_state = None                        # 仅缓存到内存，最后一次性落盘
+# ---------------- Training cycle: Each round is evaluated on the test, and the best one is selected accordingly ----------------
+best_test_acc, best_epoch = 0.0, 0       # the best based on test-accuracy
+best_state = None                        #
 
 for epoch in range(EPOCH):
     model.train()
@@ -169,17 +168,17 @@ for epoch in range(EPOCH):
 
         running_loss += loss.item()
 
-        # 控制台进度条
+        # Progress bar
         rate = step / max(len(train_loader), 1)
         a = "*" * int(rate * 50)
         b = "." * int((1 - rate) * 50)
         print(f"\repoch: {epoch+1} train loss: {int(rate*100):^3d}%[{a}->{b}]{loss:.3f}", end="")
 
-    # 这个 epoch 的平均训练 loss
+    # Average loss in each epoch
     epoch_loss = running_loss / max(len(train_loader), 1)
     # print(f"  |  epoch{epoch+1} avg train loss: {epoch_loss:.4f}")
 
-    # 可视化训练 loss（每 epoch 画一次）
+    # Visualization loss
     try:
         viz.line([epoch_loss], [epoch + 1], win='loss',
                  update='append',
@@ -187,7 +186,7 @@ for epoch in range(EPOCH):
     except Exception:
         pass
 
-    # —— 在 test 上评估，并用 test acc 选最优 ——
+    #—— Evaluating on test ——
     test_acc = evaluate_acc(model, test_loader)
     print(f"  epoch{epoch+1} TEST acc: {test_acc:.4f}")
 
@@ -202,13 +201,13 @@ for epoch in range(EPOCH):
         best_test_acc, best_epoch = test_acc, epoch + 1
         best_state = deepcopy(model.state_dict())
 
-# === 训练结束：只保存一次“最佳模型”（按 TEST acc 选出来的） ===
+# === Training completed: Save the "Best Model" (selected by TEST acc) only once. ===
 final_path = make_unique_path(f"ResNet18_{MODALITY}.pth", best_test_acc, "./models")
 torch.save(best_state if best_state is not None else model.state_dict(), final_path)
 print(f"[INFO] 保存最优模型(按 TEST acc) -> {final_path}")
 print(f"[INFO] 最优 TEST 准确率：{best_test_acc:.4f} @ epoch {best_epoch}")
 
-# === 可选：加载最优权重后再在 test 上确认一次（应该与 best_test_acc 一致/接近） ===
+# === Optional: After loading the optimal weight, confirm once again on test (it should be consistent/close to best test acc) ===
 if best_state is not None:
     model.load_state_dict(best_state)
 final_test_acc = evaluate_acc(model, test_loader)

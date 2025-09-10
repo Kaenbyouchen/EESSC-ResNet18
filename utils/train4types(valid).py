@@ -8,22 +8,11 @@ from torch import nn, optim
 from torch.utils.data import Dataset, DataLoader
 import torch.nn.functional as F
 from torchvision import transforms
-from model import ResNet18  # 你的ResNet18(3通道)实现
+from model import ResNet18  # ResNet18
 from copy import deepcopy
 
 
-# ========= 必改：你的数据路径 & 模态 =========
-# 目录结构示例：
-# train/
-#   backpack/  (里边是该模态的 png 或 npy)
-#   bicycle/
-#   car/
-#   person/
-# test/
-#   backpack/
-#
-#
-#   ...
+
 """
 把 train_dir / test_dir 改成你想跑的模态路径：
 把 MODALITY 改成对应字符串，让脚本自动设定 IN_CH（1/3/4）。
@@ -254,7 +243,7 @@ for epoch in range(EPOCH):
         best_state = deepcopy(model.state_dict())
 
 # === 训练结束：只保存一次“最佳模型” ===
-final_path = make_unique_path(f"ResNet18_{MODALITY}.pth", best_acc, "./models")
+final_path = make_unique_path(f"ResNet18_{MODALITY}.pth", best_acc, "../models")
 torch.save(best_state if best_state is not None else model.state_dict(), final_path)
 print(f"[INFO] 保存最优模型 -> {final_path}")
 print("Finish ! 最优val准确率：{:.4f} @ epoch {}".format(best_acc, best_epoch))

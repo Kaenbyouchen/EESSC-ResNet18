@@ -1,13 +1,13 @@
-# 忽略数据集
+# ignore datasets
 CIFAR10/
 subset/
 
-# 忽略模型文件
+# ignore models
 *.pth
 *.pt
 *.tar.gz
 
-# Python 缓存
+# ignore python cache
 __pycache__/
 *.pyc
 .idea/

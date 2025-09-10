@@ -12,20 +12,20 @@ from torch import nn
 from torch.utils.data import Dataset, DataLoader
 from torchvision import transforms
 
-from model import ResNet18  # 你的ResNet18实现（支持 in_ch 参数）
+from model import ResNet18
 
-# ----------------- 参数 -----------------
+# ----------------- Parameters (in config_test.json) -----------------
 
 def get_args():
-    with open("config_test.json", "r") as f:
+    with open("../config_test.json", "r") as f:
         cfg = json.load(f)
     return argparse.Namespace(**cfg)
 
-# ----------------- 模态与输入通道 -----------------
+# ----------------- Modalities & Channel -----------------
 def get_in_ch(modality: str) -> int:
     return {"RGB": 3, "RGB_RESIZED": 3, "RAW": 1, "PACKED": 4}[modality]
 
-# ----------------- 变换（与训练一致的Val/Test变换） -----------------
+# ----------------- Transform & Normalization -----------------
 pil_val_tf = transforms.Compose([
     transforms.Resize((224, 224)),
     transforms.ToTensor(),
@@ -33,11 +33,10 @@ pil_val_tf = transforms.Compose([
                          (0.5, 0.5, 0.5)),
 ])
 
-# ----------------- 支持PNG/JPG/NPY的数据集 -----------------
+# ----------------- Supported Data types -----------------
 VALID_EXTS = {".png", ".jpg", ".jpeg", ".bmp", ".npy"}
 
 class MixedFolder(Dataset):
-    """ImageFolder风格：支持 png/jpg 与 npy；支持 类别/模态/文件 结构"""
     def __init__(self, root, is_train: bool, modality: str | None = None):
         self.root = root
         self.is_train = is_train
@@ -98,14 +97,14 @@ class MixedFolder(Dataset):
             x = pil_val_tf(im)
         return x, torch.tensor(y, dtype=torch.long)
 
-# ----------------- 评估（准确率 + 混淆矩阵 + 逐类准确率） -----------------
+# ----------------- Evaluation -----------------
 @torch.no_grad()
 def evaluate_full(model: nn.Module, loader: DataLoader, device: torch.device, num_classes: int):
     model.eval()
     total = len(loader.dataset)
     correct = 0
 
-    # 混淆矩阵：行=真实标签(gt)，列=预测标签(pred)
+    # 混淆矩阵：行=真实标签(gt)，列=预测标签(pred) confused metrix: row for real labels, column for prediction
     cm = torch.zeros((num_classes, num_classes), dtype=torch.long)
 
     for x, y in loader:
@@ -114,19 +113,19 @@ def evaluate_full(model: nn.Module, loader: DataLoader, device: torch.device, nu
         pred = logits.argmax(dim=1)          # [B]
         correct += (pred == y).sum().item()
 
-        # 统计混淆矩阵
+        # summarize confused metrix
         for t, p in zip(y.view(-1), pred.view(-1)):
             cm[t.long(), p.long()] += 1
 
     acc = correct / max(total, 1)
 
-    # 逐类准确率（per-class accuracy）：对角线元素 / 该类总样本数
-    support = cm.sum(dim=1).clamp_min(1)     # 每类的样本数（避免除0）
+    # per-class accuracy: Diagonal elements/total number of samples in this class
+    support = cm.sum(dim=1).clamp_min(1)     # The number of samples for each category (avoid division by 0)
     per_class_acc = (cm.diag().float() / support.float()).cpu().numpy()
 
     return acc, cm.cpu().numpy(), per_class_acc
 
-# ----------------- 主函数 -----------------
+# ----------------- Main function -----------------
 def main():
     args = get_args()
     device = torch.device(args.device if torch.cuda.is_available() else 'cpu')
@@ -140,10 +139,10 @@ def main():
         num_workers=args.num_workers, pin_memory=(device.type == 'cuda')
     )
 
-    # 模型
+    # Model
     model = ResNet18(classes_num=num_classes, in_ch=in_ch).to(device)
 
-    # 加载权重（兼容 DataParallel）
+    # Loading weights
     state = torch.load(args.weights, map_location=device)
     if isinstance(state, dict) and 'state_dict' in state:
         state = state['state_dict']
@@ -153,25 +152,25 @@ def main():
         new_state[nk] = v
     model.load_state_dict(new_state, strict=True)
 
-    # 评估
+    # evaluation
     acc, cm, per_class_acc = evaluate_full(model, test_loader, device, num_classes)
 
-    # 打印结果
+    # print results
     print(f"\nTest set ({args.modality}) accuracy: {acc:.4f}")
     print(f"Classes ({num_classes}): {test_set.classes}")
 
-    # 逐类准确率
+    # per class accuracy
     print("\nPer-class accuracy:")
     for i, cls in enumerate(test_set.classes):
         print(f"  {i:2d} - {cls:15s}: {per_class_acc[i]:.4f}")
 
-    # 混淆矩阵
+    # confused metrix
     print("\nConfusion Matrix (rows=GT, cols=Pred):")
-    # 友好打印（对齐）
+    # alignment
     with np.printoptions(linewidth=160, formatter={'int': lambda x: f"{x:6d}"}):
         print(cm)
 
-    # 可选：保存混淆矩阵为CSV
+    # Save the confusion matrix as CSV
     if args.save_cm_csv:
         import csv
         os.makedirs(os.path.dirname(args.save_cm_csv), exist_ok=True) if os.path.dirname(args.save_cm_csv) else None

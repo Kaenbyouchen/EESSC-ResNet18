@@ -9,11 +9,13 @@ from torch.nn import functional as F
 其中CommonBlock负责完成ResNet18中带有实线的直接相连相加的Block操作
 注意ResNet18中所有非shortcut部分的卷积kernel_size=3， padding=1，仅仅in_channel, out_channel, stride的不同 
 注意ResNet18中所有shortcut部分的卷积kernel_size=1， padding=0，仅仅in_channel, out_channel, stride的不同
+CommonBlock: Straightly added 
+SpecialBlock: Using 1*1 Conv to downsample and then add up
 """
 
 
-class CommonBlock(nn.Module):   #这个是前两个block，不需要1*1的下采样就拼接
-    def __init__(self, in_channel, out_channel, stride):        # 普通Block简单完成两次卷积操作，此处stride=1
+class CommonBlock(nn.Module):   #First two blocks(without 1*1 downsample)
+    def __init__(self, in_channel, out_channel, stride):        # each CommonBlock 2 conv,stride=1
         super(CommonBlock, self).__init__()   #definition of conv and bn
         self.conv1 = nn.Conv2d(in_channel, out_channel, kernel_size=3, stride=stride, padding=1, bias=False)
         self.bn1 = nn.BatchNorm2d(out_channel)
@@ -21,19 +23,19 @@ class CommonBlock(nn.Module):   #这个是前两个block，不需要1*1的下采
         self.bn2 = nn.BatchNorm2d(out_channel)
 
     def forward(self, x):
-        identity = x                                            # 普通Block的shortcut为直连，不需要升维下采样
+        identity = x                                            # Straightly connect (without downsample)
 
-        x = F.relu(self.bn1(self.conv1(x)), inplace=True)       # 完成一次卷积
-        x = self.bn2(self.conv2(x))                             # 第二次卷积不加relu激活函数
+        x = F.relu(self.bn1(self.conv1(x)), inplace=True)       # first conv
+        x = self.bn2(self.conv2(x))                             # second conv (no need relu)
 
-        x += identity                                           # 两路相加后再进激活函数
-        return F.relu(x, inplace=True)                          # 添加激活函数输出
+        x += identity                                           # add up 1st and 2nd then relu
+        return F.relu(x, inplace=True)                          # output
 
 
-class SpecialBlock(nn.Module):                                  # 包含1*1下采样的block
-    def __init__(self, in_channel, out_channel, stride):        # 注意这里的stride传入一个数组[2,1]，shortcut和残差部分stride不同
+class SpecialBlock(nn.Module):                                  # include 1*1 downsample
+    def __init__(self, in_channel, out_channel, stride):        # stride[2,1]
         super(SpecialBlock, self).__init__()
-        self.change_channel = nn.Sequential(                    # 负责升维下采样的卷积网络change_channel
+        self.change_channel = nn.Sequential(                    # change_channel:downsample, dimentional increase
             nn.Conv2d(in_channel, out_channel, kernel_size=1, stride=stride[0], padding=0, bias=False),
             nn.BatchNorm2d(out_channel)
         )
@@ -43,29 +45,29 @@ class SpecialBlock(nn.Module):                                  # 包含1*1下�
         self.bn2 = nn.BatchNorm2d(out_channel)
 
     def forward(self, x):
-        identity = self.change_channel(x)                       # 调用change_channel对输入修改，为后面相加做变换准备
+        identity = self.change_channel(x)                       # downsample
 
         x = F.relu(self.bn1(self.conv1(x)), inplace=True)
-        x = self.bn2(self.conv2(x))                             # 完成残差部分的卷积
+        x = self.bn2(self.conv2(x))
 
         x += identity
-        return F.relu(x, inplace=True)                          # 输出卷积单元
+        return F.relu(x, inplace=True)                          # output
 
 
 class ResNet18(nn.Module):
-    def __init__(self, classes_num,in_ch=3):
+    def __init__(self, classes_num,in_ch=3):   # can set different chaannels (RGB:3 RAW:1 PACKED:4)
         super(ResNet18, self).__init__()
-        self.prepare = nn.Sequential(           # 所有的ResNet共有的预处理==》[batch, 64, 56, 56]
+        self.prepare = nn.Sequential(           #
             nn.Conv2d(in_ch, 64, 7, 2, 3),
             nn.BatchNorm2d(64),
             nn.ReLU(inplace=True),
             nn.MaxPool2d(3, 2, 1)
         )
-        self.layer1 = nn.Sequential(            # layer1有点特别，由于输入输出的channel均是64，故两个CommonBlock
+        self.layer1 = nn.Sequential(            # two CommonBlock
             CommonBlock(64, 64, 1),
             CommonBlock(64, 64, 1)
         )
-        self.layer2 = nn.Sequential(            # layer234类似，由于输入输出的channel不同，故一个SpecialBlock，一个CommonBlock
+        self.layer2 = nn.Sequential(            # one SpecialBlock, one CommonBlock
             SpecialBlock(64, 128, [2, 1]),
             CommonBlock(128, 128, 1)
         )
@@ -77,25 +79,25 @@ class ResNet18(nn.Module):
             SpecialBlock(256, 512, [2, 1]),
             CommonBlock(512, 512, 1)
         )
-        self.pool = nn.AdaptiveAvgPool2d(output_size=(1, 1))    # 卷积结束，通过一个自适应均值池化==》 [batch, 512, 1, 1]
-        self.fc = nn.Sequential(                # 最后用于分类的全连接层，根据需要灵活变化
+        self.pool = nn.AdaptiveAvgPool2d(output_size=(1, 1))
+        self.fc = nn.Sequential(
             nn.Dropout(p=0.5),
             nn.Linear(512, 256),
             nn.ReLU(inplace=True),
             nn.Dropout(p=0.5),
-            nn.Linear(256, classes_num)         # 这个使用CIFAR10数据集，定为10分类
+            nn.Linear(256, classes_num)
         )
 
     def forward(self, x):
-        x = self.prepare(x)         # 预处理
+        x = self.prepare(x)
 
-        x = self.layer1(x)          # 四个卷积单元
+        x = self.layer1(x)          # four blocks
         x = self.layer2(x)
         x = self.layer3(x)
         x = self.layer4(x)
 
-        x = self.pool(x)            # 池化
-        x = x.reshape(x.shape[0], -1)   # 将x展平，输入全连接层
+        x = self.pool(x)
+        x = x.reshape(x.shape[0], -1)   # unfold x to fc
         x = self.fc(x)
 
         return x
