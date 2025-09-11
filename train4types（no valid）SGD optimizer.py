@@ -21,8 +21,8 @@ MODALITY  = "RGB"  # choose: 'RGB' / 'RGB_RESIZED' / 'PACKED' / 'RAW'
 # mapping modality to channels
 IN_CH = {"RGB": 3, "RGB_RESIZED": 3, "RAW": 1, "PACKED": 4}[MODALITY]
 BATCH_SIZE = 32
-EPOCH = 60
-LR = 1e-6
+EPOCH = 50
+LR = 5e-5
 WEIGHT_DECAY = 0.05
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 print("device =", device, "| modality =", MODALITY, "| in_ch =", IN_CH)
@@ -129,9 +129,23 @@ test_loader  = DataLoader(test_set,  batch_size=BATCH_SIZE, shuffle=False, num_w
 
 # ---------------- Model and Optimizer ----------------
 model = ResNet18(classes_num=num_classes, in_ch=IN_CH).to(device)
-optimizer = optim.Adam(model.parameters(), lr=LR, weight_decay=WEIGHT_DECAY)
+# optimizer = optim.Adam(model.parameters(), lr=LR, weight_decay=WEIGHT_DECAY)
+
+optimizer = optim.SGD(
+    model.parameters(),
+    lr=0.01,              # 学习率（推荐从0.01开始）
+    momentum=0.9,         # 动量系数，常用0.9
+    weight_decay=WEIGHT_DECAY,
+    nesterov=True         # 可选，通常设True更好
+)
+
 criterion = nn.CrossEntropyLoss()
 viz = visdom.Visdom()
+
+from torch.optim.lr_scheduler import CosineAnnealingLR
+
+scheduler = CosineAnnealingLR(optimizer, T_max=EPOCH)  # T_max=总轮数
+
 
 # ---------------- Evaluation function: Calculate the accuracy rate given the loader ----------------
 @torch.no_grad()
@@ -189,6 +203,8 @@ for epoch in range(EPOCH):
     #—— Evaluating on test ——
     test_acc = evaluate_acc(model, test_loader)
     print(f"  epoch{epoch+1} TEST acc: {test_acc:.4f}")
+
+    scheduler.step()  # <—— adjust lr each epoch
 
     try:
         viz.line([test_acc], [epoch + 1], win='test_acc',
