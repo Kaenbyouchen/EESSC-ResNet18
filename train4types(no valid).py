@@ -23,7 +23,7 @@ before run the code, run this in terminal:
 # ========= Data storage path & Modality=========
 train_dir = r"D:\EESSC\archive\80train20test\train"
 test_dir  = r"D:\EESSC\archive\80train20test\test"
-MODALITY  = "RGB"  # choose: 'RGB' / 'RGB_RESIZED' / 'PACKED' / 'RAW'
+MODALITY  = "RAW"  # choose: 'RGB' / 'RGB_RESIZED' / 'PACKED' / 'RAW'
 # ======================================
 # mapping modality to channels
 IN_CH = {"RGB": 3, "RGB_RESIZED": 3, "RAW": 1, "PACKED": 4}[MODALITY]
