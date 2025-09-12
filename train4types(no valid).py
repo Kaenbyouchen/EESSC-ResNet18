@@ -13,17 +13,17 @@ from torchvision import transforms
 
 from model import ResNet18  # 你的 ResNet18 实现（支持 in_ch）
 """
-把 train_dir / test_dir 改成你想跑的模态路径：
-把 MODALITY 改成对应字符串，让脚本自动设定 IN_CH（1/3/4）。
-其余保持不变，直接运行即可。
-运行前在终端运行 conda activate EESSC1
-python -m visdom.server -port 8097
+change train_dir / test_dir 改成你想跑的模态路径：
+set MODALITY to your data type
+before run the code, run this in terminal: 
+1. conda activate EESSC1
+2. python -m visdom.server -port 8097
 
 """
 # ========= Data storage path & Modality=========
 train_dir = r"D:\EESSC\archive\80train20test\train"
 test_dir  = r"D:\EESSC\archive\80train20test\test"
-MODALITY  = "RAW"  # choose: 'RGB' / 'RGB_RESIZED' / 'PACKED' / 'RAW'
+MODALITY  = "RGB"  # choose: 'RGB' / 'RGB_RESIZED' / 'PACKED' / 'RAW'
 # ======================================
 # mapping modality to channels
 IN_CH = {"RGB": 3, "RGB_RESIZED": 3, "RAW": 1, "PACKED": 4}[MODALITY]
