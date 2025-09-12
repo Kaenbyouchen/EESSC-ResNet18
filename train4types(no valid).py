@@ -12,16 +12,23 @@ import torch.nn.functional as F
 from torchvision import transforms
 
 from model import ResNet18  # 你的 ResNet18 实现（支持 in_ch）
+"""
+把 train_dir / test_dir 改成你想跑的模态路径：
+把 MODALITY 改成对应字符串，让脚本自动设定 IN_CH（1/3/4）。
+其余保持不变，直接运行即可。
+运行前在终端运行 conda activate EESSC1
+python -m visdom.server -port 8097
 
+"""
 # ========= Data storage path & Modality=========
 train_dir = r"D:\EESSC\archive\80train20test\train"
 test_dir  = r"D:\EESSC\archive\80train20test\test"
-MODALITY  = "RGB"  # choose: 'RGB' / 'RGB_RESIZED' / 'PACKED' / 'RAW'
+MODALITY  = "RAW"  # choose: 'RGB' / 'RGB_RESIZED' / 'PACKED' / 'RAW'
 # ======================================
 # mapping modality to channels
 IN_CH = {"RGB": 3, "RGB_RESIZED": 3, "RAW": 1, "PACKED": 4}[MODALITY]
 BATCH_SIZE = 32
-EPOCH = 60
+EPOCH = 100
 LR = 1e-6
 WEIGHT_DECAY = 0.05
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
@@ -101,8 +108,8 @@ class MixedFolder(Dataset):
         x = torch.from_numpy(arr)    # [C,H,W]
         x = F.interpolate(x.unsqueeze(0), size=(224, 224),
                           mode="bilinear", align_corners=False).squeeze(0)
-        # if self.is_train and torch.rand(1).item() < 0.5:   #npy improvement:horizontal flip: enlarge dataset
-        #     x = torch.flip(x, dims=[2])
+        if self.is_train and torch.rand(1).item() < 0.5:   #npy improvement:horizontal flip: enlarge dataset
+            x = torch.flip(x, dims=[2])
         x = (x - 0.5) / 0.5
         return x
 
