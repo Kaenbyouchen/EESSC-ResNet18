@@ -13,7 +13,7 @@ from torchvision import transforms
 
 from model import ResNet18  # 你的 ResNet18 实现（支持 in_ch）
 """
-change train_dir / test_dir 改成你想跑的模态路径：
+change train_dir / test_dir
 set MODALITY to your data type
 before run the code, run this in terminal: 
 1. conda activate EESSC1
